@@ -150,6 +150,10 @@ export const LIVE_FILES = [
     // One Linux-only Node child reads fixture system CAs and exits within 10s;
     // no child ports or network I/O. In-process HTTPS fixtures use listen(0).
     "tests/upstream-ca-default-trust.test.ts",
+    // #5449: spawns one bare `node -e` child purely as a live/dead PID fixture
+    // (like #5046/B's) plus in-process eval workers (like #4762's); binds no
+    // ports — the entry is for the SPAWN_RE tripwire alone
+    "tests/issue5449-offloop-owner-reap.test.ts",
 ];
 
 /** Band width per live file: the zone ladder drifts +1 per EADDRINUSE retry;
