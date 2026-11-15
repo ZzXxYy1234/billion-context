@@ -147,6 +147,9 @@ export const LIVE_FILES = [
     // Native-zstd absence is simulated in an isolated Node child; it binds
     // no sockets and changes only that child's built-in module exports.
     "tests/content-encoding-zstd.test.ts",
+    // #6831: runs the import-graph gate script as a child process against a
+    // throwaway git fixture; no sockets — the entry is for the tripwire
+    "tests/check-test-import-graph.test.ts",
 ];
 
 /** Band width per live file: the zone ladder drifts +1 per EADDRINUSE retry;
