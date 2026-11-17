@@ -91,7 +91,13 @@ export function installWebSocketBridge(
     /** #300/#3073: this server's per-instance identity for the x-bili-hop chain stamp (see WsBridgeContext.instanceId). */
     instanceId?: string,
 ): (req: http.IncomingMessage, socket: Duplex, head: Buffer) => boolean {
-    const wss = new WebSocketServer({ noServer: true, maxPayload: limitsReceiveBytes(), perMessageDeflate: false });
+    // #7047: `wss` is re-created lazily by the upgrade handler when it detects
+    // the wss was closed by a ladder re-listen (see `wssDead` below) — the
+    // #2941 post-bind ladder re-listens the SAME server object, and the 'close'
+    // backstop kills the wss (the ws library never reopens a closed
+    // WebSocketServer), so a fresh wss on the next upgrade keeps the lane alive.
+    let wss = new WebSocketServer({ noServer: true, maxPayload: limitsReceiveBytes(), perMessageDeflate: false });
+    let wssDead = false;
     const sessions = new Set<{ session: WsBridgeSession; peer: WebSocket }>();
     let connectionId = 0;
     const close = server.close.bind(server);
@@ -106,6 +112,7 @@ export function installWebSocketBridge(
         for (const { session } of sessions) session.shutdown("server-close");
         for (const peer of wss.clients) peer.terminate();
         wss.close();
+        wssDead = true;
     });
     return (source, socket, head) => {
         const admitted = isLoopbackAddress(source.socket.remoteAddress);
@@ -133,6 +140,20 @@ export function installWebSocketBridge(
                 return;
             }
             if (socket.destroyed) return;
+            // #7047: the #2941 post-bind ladder closes the bound port and
+            // re-listens the SAME server object. The 'close' backstop has
+            // already run wss.close(), and the ws library never reopens a
+            // closed WebSocketServer — every later upgrade would 503
+            // (completeUpgrade: _state > RUNNING) for the rest of the process.
+            // Re-arm lazily here: a fresh wss on the first upgrade after a
+            // re-listen. The ladder path has already cut every connection
+            // (closeAllConnections), so no live session is lost. The 'listening'
+            // event can't be used: attemptListen (server.ts) strips all
+            // 'listening' listeners before each listen.
+            if (wssDead) {
+                wss = new WebSocketServer({ noServer: true, maxPayload: limitsReceiveBytes(), perMessageDeflate: false });
+                wssDead = false;
+            }
             wss.handleUpgrade(source, socket, head, peer => {
                 const label = `[${codec.name}] [conn=${++connectionId}] [session=${JSON.stringify(conversationId.slice(0, 128))}]`;
                 const trace: WsBridgeLog = (level, message) => log(level, `${label} ${message}`);
